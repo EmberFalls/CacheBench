@@ -1,11 +1,14 @@
 #include <iostream.h>
 #include <conio.h>
+#include <stdio.h>
 #include "Workload.h"
 #include "BenchmarkEngine.h"
 #include "LRUPolicy.h"
 #include "LFUPolicy.h"
 #include "SecondChancePolicy.h"
 #include "AdaptiveHybridPolicy.h"
+
+static const char *RESULTS_FILE = "C:\\TURBOC3\\OOPS-C~1\\RESULTS.TXT";
 
 void printMenu() {
     cout << "\n========== CACHEBENCH ==========" << endl;
@@ -16,7 +19,7 @@ void printMenu() {
     cout << "5. Use Burst Workload" << endl;
     cout << "6. Run One Policy" << endl;
     cout << "7. Benchmark All Policies" << endl;
-    cout << "8. View OOP/Policy Information" << endl;
+    cout << "8. View Saved Benchmark Results" << endl;
     cout << "9. Exit" << endl;
     cout << "Choose an option: ";
 }
@@ -30,18 +33,76 @@ int readCapacity() {
     return capacity;
 }
 
-void printInfo() {
-    cout << "\nOOP design:" << endl;
-    cout << "CacheEntry encapsulates item metadata." << endl;
-    cout << "CachePolicy is an abstract base class." << endl;
-    cout << "LRU, LFU, Second-Chance, and Adaptive Hybrid inherit from it." << endl;
-    cout << "Cache calls chooseVictim through a CachePolicy pointer (runtime polymorphism)." << endl;
-    cout << "Adaptive Hybrid retains entries using frequency (60%) and normalized recency (40%)." << endl;
-    cout << "LFU ties are resolved by oldest last-access time." << endl;
+void writePolicyResult(FILE *output, const Workload &workload,
+                       int capacity, CachePolicy *policy) {
+    Cache cache(capacity, policy);
+    int i;
+    for (i = 0; i < workload.getRequestCount(); i++)
+        cache.processRequest(workload.getRequest(i));
+
+    const Metrics &metrics = cache.getMetrics();
+    fprintf(output, "%-22s%6d%8d%11d%9.1f%%\n",
+            metrics.getPolicyName(), metrics.getHits(), metrics.getMisses(),
+            metrics.getEvictions(), metrics.getHitRatio());
+}
+
+int appendBenchmark(const Workload &workload, int capacity,
+                    int allPolicies, int selectedPolicy) {
+    FILE *output = fopen(RESULTS_FILE, "a");
+    if (output == NULL) return 0;
+
+    fprintf(output, "\nWorkload: %s\n", workload.getName());
+    fprintf(output, "Cache Capacity: %d\n", capacity);
+    fprintf(output, "Total Requests: %d\n\n", workload.getRequestCount());
+    fprintf(output, "Policy                 Hits  Misses  Evictions  Hit Ratio\n");
+    fprintf(output, "---------------------------------------------------------\n");
+
+    if (allPolicies) {
+        LRUPolicy lru;
+        LFUPolicy lfu;
+        SecondChancePolicy secondChance;
+        AdaptiveHybridPolicy adaptive;
+        writePolicyResult(output, workload, capacity, &lru);
+        writePolicyResult(output, workload, capacity, &lfu);
+        writePolicyResult(output, workload, capacity, &secondChance);
+        writePolicyResult(output, workload, capacity, &adaptive);
+    } else if (selectedPolicy == 1) {
+        LRUPolicy policy;
+        writePolicyResult(output, workload, capacity, &policy);
+    } else if (selectedPolicy == 2) {
+        LFUPolicy policy;
+        writePolicyResult(output, workload, capacity, &policy);
+    } else if (selectedPolicy == 3) {
+        SecondChancePolicy policy;
+        writePolicyResult(output, workload, capacity, &policy);
+    } else if (selectedPolicy == 4) {
+        AdaptiveHybridPolicy policy;
+        writePolicyResult(output, workload, capacity, &policy);
+    }
+
+    fprintf(output, "\n");
+    fclose(output);
+    return 1;
+}
+
+void showSavedResults() {
+    FILE *input = fopen(RESULTS_FILE, "r");
+    char line[128];
+
+    if (input == NULL) {
+        cout << "No saved benchmark results found yet." << endl;
+        return;
+    }
+
+    cout << "\nSaved benchmark results:\n" << endl;
+    while (fgets(line, sizeof(line), input) != NULL) cout << line;
+    fclose(input);
 }
 
 void runSingle(const Workload &workload, int capacity) {
     int choice;
+    int validChoice = 1;
+    int saved;
     cout << "\n1. LRU\n2. LFU\n3. Second-Chance\n4. Adaptive Hybrid\nChoose policy: ";
     cin >> choice;
     BenchmarkEngine engine(workload, capacity);
@@ -55,9 +116,14 @@ void runSingle(const Workload &workload, int capacity) {
         AdaptiveHybridPolicy policy; engine.runOne(&policy);
     } else {
         cout << "Invalid policy selection." << endl;
-        return;
+        validChoice = 0;
     }
-    engine.printReport();
+    if (validChoice) {
+        engine.printReport();
+        saved = appendBenchmark(workload, capacity, 0, choice);
+        if (saved) cout << "Results appended to RESULTS.TXT." << endl;
+        else cout << "Could not write RESULTS.TXT." << endl;
+    }
 }
 
 int main() {
@@ -65,6 +131,7 @@ int main() {
     int choice = 0;
     int capacity;
     int count, values[MAX_WORKLOAD_SIZE], i;
+    int saved;
     cout << "CacheBench: Cache Replacement Simulator" << endl;
     while (choice != 9) {
         printMenu();
@@ -92,8 +159,15 @@ int main() {
         } else if (choice == 7) {
             if (workload.getRequestCount() == 0) { cout << "Load a workload first." << endl; continue; }
             capacity = readCapacity();
-            { BenchmarkEngine engine(workload, capacity); engine.runAll(); engine.printReport(); }
-        } else if (choice == 8) printInfo();
+            {
+                BenchmarkEngine engine(workload, capacity);
+                engine.runAll();
+                engine.printReport();
+            }
+            saved = appendBenchmark(workload, capacity, 1, 0);
+            if (saved) cout << "Results appended to RESULTS.TXT." << endl;
+            else cout << "Could not write RESULTS.TXT." << endl;
+        } else if (choice == 8) showSavedResults();
         else if (choice != 9) cout << "Invalid selection." << endl;
     }
     cout << "Goodbye." << endl;
